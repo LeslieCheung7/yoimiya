@@ -116,38 +116,38 @@ func OpenLogFile(path string, fid uint32, fsize int64, ftype FileType, ioType IO
 // If offset is invalid, the error is io.EOF.
 func (lf *LogFile) ReadLogEntry(offset int64) (*LogEntry, int64, error) {
 	// read entry header.
-	headerBuf, err := lf.Read(offset, uint32(MaxHeaderSize))
+	headerBuf, err := lf.readBytes(offset, MaxHeaderSize)
 	if err != nil {
 		return nil, 0, err
 	}
-	// the end of entries.
 	header, size := decodeHeader(headerBuf)
+	// the end of entries.
 	if header.crc32 == 0 && header.kSize == 0 && header.vSize == 0 {
 		return nil, 0, ErrEndOfEntry
 	}
 
-	entry := &LogEntry{
+	e := &LogEntry{
 		ExpiredAt: header.expiredAt,
 		Type:      header.typ,
 	}
-	kSize, vSize := int64(header.vSize), int64(header.vSize)
+	kSize, vSize := int64(header.kSize), int64(header.vSize)
 	var entrySize = size + kSize + vSize
 
-	// read entry's key and value.
+	// read entry key and value.
 	if kSize > 0 || vSize > 0 {
-		kvBuf, err := lf.Read(offset+size, uint32(kSize+vSize))
+		kvBuf, err := lf.readBytes(offset+size, kSize+vSize)
 		if err != nil {
 			return nil, 0, err
 		}
-		entry.Key = kvBuf[:kSize]
-		entry.Value = kvBuf[kSize:]
+		e.Key = kvBuf[:kSize]
+		e.Value = kvBuf[kSize:]
 	}
 
-	// crc check.
-	if crc := getEntryCrc(entry, headerBuf[crc32.Size:size]); crc != header.crc32 {
+	// crc32 check.
+	if crc := getEntryCrc(e, headerBuf[crc32.Size:size]); crc != header.crc32 {
 		return nil, 0, ErrInvalidCrc
 	}
-	return entry, entrySize, nil
+	return e, entrySize, nil
 }
 
 // Read a byte slice in the log file at offset, slice length is the given size.
@@ -196,6 +196,12 @@ func (lf *LogFile) Close() error {
 // File can't be retrieved, if you do this, so use it carefully.
 func (lf *LogFile) Delete() error {
 	return lf.IoSelector.Delete()
+}
+
+func (lf *LogFile) readBytes(offset, n int64) (buf []byte, err error) {
+	buf = make([]byte, n)
+	_, err = lf.IoSelector.Read(buf, offset)
+	return
 }
 
 func (lf *LogFile) getLogFileName(path string, fid uint32, ftype FileType) (name string, err error) {

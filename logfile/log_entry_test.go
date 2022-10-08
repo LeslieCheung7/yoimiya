@@ -70,7 +70,8 @@ func Test_decodeHeader(t *testing.T) {
 			"no-fields", args{buf: []byte{28, 223, 68, 33, 0, 0, 0, 0}}, &entryHeader{crc32: 558161692}, 8,
 		},
 		{
-			"normal", args{buf: []byte{101, 208, 223, 156, 0, 4, 14, 198, 147, 242, 166, 3}}, &entryHeader{crc32: 2631913573, typ: 0, kSize: 2, vSize: 7, expiredAt: 443434211}, 12,
+			"normal", args{buf: []byte{101, 208, 223, 156, 0, 4, 14, 198, 147, 242, 166, 3}},
+			&entryHeader{crc32: 2631913573, typ: 0, kSize: 2, vSize: 7, expiredAt: 443434211}, 12,
 		},
 	}
 
