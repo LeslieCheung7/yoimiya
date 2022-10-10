@@ -122,6 +122,7 @@ func (skl *skipList) sklInsert(score float64, member string) *sklNode {
 		updates[i] = p
 	}
 
+	// update skipList's head node if current level is greater than skl.level
 	level := randomLevel()
 	if level > skl.level {
 		for i := skl.level; i < level; i++ {
