@@ -1,6 +1,9 @@
 package ds
 
-import "math/rand"
+import (
+	"math"
+	"math/rand"
+)
 
 // zset is the implementation of sorted set.
 
@@ -72,6 +75,236 @@ func (z *SortedSet) ZAdd(key string, score float64, member string) {
 	if node != nil {
 		item.dict[member] = node
 	}
+}
+
+// ZScore returns the score of member in the sorted set at key.
+func (z *SortedSet) ZScore(key, member string) (ok bool, score float64) {
+	if !z.exist(key) {
+		return
+	}
+
+	node, exist := z.record[key].dict[member]
+	if !exist {
+		return
+	}
+
+	return true, node.score
+}
+
+// ZCard returns the sorted set cardinality (number of elements) of the sorted stored at key.
+func (z *SortedSet) ZCard(key string) int {
+	if !z.exist(key) {
+		return 0
+	}
+
+	return len(z.record[key].dict)
+}
+
+// ZRank returns the rank of member in the sorted set stored at the key, with scores ordered from low to high.
+// The rank (or index) is 0-based, which means that member with the lowest score has rank 0.
+func (z *SortedSet) ZRank(key, member string) int64 {
+	if !z.exist(key) {
+		return -1
+	}
+
+	node, exist := z.record[key].dict[member]
+	if !exist {
+		return -1
+	}
+
+	rank := z.record[key].skl.sklGetRank(node.score, member)
+	rank--
+
+	return rank
+}
+
+// ZRevRank returns the rank of member in the sorted set stored at key, with the scores ordered from high to low.
+// The rank (or index) is 0-based, which means that the member with the highest score has rank 0.
+func (z *SortedSet) ZRevRank(key, member string) int64 {
+	if !z.exist(key) {
+		return -1
+	}
+
+	node, exist := z.record[key].dict[member]
+	if !exist {
+		return -1
+	}
+
+	rank := z.record[key].skl.sklGetRank(node.score, member)
+
+	return z.record[key].skl.length - rank
+}
+
+// ZIncrBy increments the score of member in the sorted set stored at key bt increment.
+// If member does not exist in the sorted set, it is added with increment as its score (as if its previous score was 0.0)
+// If key does not exist, a new sorted set with the specified member as its sole member is created.
+func (z *SortedSet) ZIncrBy(key string, increment float64, member string) float64 {
+	if z.exist(key) {
+		node, exist := z.record[key].dict[member]
+		if exist {
+			increment += node.score
+		}
+	}
+
+	z.ZAdd(key, increment, member)
+	return increment
+}
+
+// ZRange returns the specified range of elements in the sorted set stored at key.
+func (z *SortedSet) ZRange(key string, start, stop int) []interface{} {
+	if !z.exist(key) {
+		return nil
+	}
+
+	return z.findRange(key, int64(start), int64(stop), false, false)
+}
+
+// ZRangeWithScores returns the specified range of elements in the sorted set stored at key.
+func (z *SortedSet) ZRangeWithScores(key string, start, stop int) []interface{} {
+	if !z.exist(key) {
+		return nil
+	}
+
+	return z.findRange(key, int64(start), int64(stop), false, true)
+}
+
+// ZRevRange returns the specified range of elements in the sorted set stored at key.
+// The elements are considered to be ordered from the highest to the lowest score.
+// Descending lexicographical order is used for elements with equal score.
+func (z *SortedSet) ZRevRange(key string, start, stop int) []interface{} {
+	if !z.exist(key) {
+		return nil
+	}
+
+	return z.findRange(key, int64(start), int64(stop), true, false)
+}
+
+func (z *SortedSet) ZRevRangeWithScores(key string, start, stop int) []interface{} {
+	if !z.exist(key) {
+		return nil
+	}
+
+	return z.findRange(key, int64(start), int64(stop), true, true)
+}
+
+// ZRem removes the specified member from the sorted set stored at key.
+// Non being member are ignored.
+// An error is returned when key exists and does not hold a sorted set.
+func (z *SortedSet) ZRem(key, member string) bool {
+	if !z.exist(key) {
+		return false
+	}
+
+	node, exist := z.record[key].dict[member]
+	if exist {
+		z.record[key].skl.sklDelete(node.score, member)
+		delete(z.record[key].dict, member)
+		return true
+	}
+
+	return false
+}
+
+// ZGetByRank get the member at key by rank, the rank is ordered from lowest to highest.
+// The rank of lowest is 0 and so on.
+func (z *SortedSet) ZGetByRank(key string, rank int) (val []interface{}) {
+	if !z.exist(key) {
+		return nil
+	}
+
+	member, score := z.getByRank(key, int64(rank), false)
+	val = append(val, member, score)
+	return
+}
+
+// ZRevGetByRank get the number at key by rank, the rank is ordered from highest to lowest.
+// The rank of highest is 0 and so on.
+func (z *SortedSet) ZRevGetByRank(key string, rank int) (val []interface{}) {
+	if !z.exist(key) {
+		return nil
+	}
+
+	member, score := z.getByRank(key, int64(rank), true)
+	val = append(val, member, score)
+	return
+}
+
+// ZScoreRange returns all the elements in the sorted set at key with a score between min and max (including elements
+// with score equal to min or max)
+// The elements are considered to be ordered from low to high scores.
+func (z *SortedSet) ZScoreRange(key string, min, max float64) (val []interface{}) {
+	if !z.exist(key) || min > max {
+		return nil
+	}
+
+	item := z.record[key].skl
+	minScore := item.head.level[0].forward.score
+	if min < minScore {
+		min = minScore
+	}
+
+	maxScore := item.tail.score
+	if max > maxScore {
+		max = maxScore
+	}
+
+	p := item.head
+	for i := item.level - 1; i >= 0; i-- {
+		for p.level[i].forward != nil && p.level[i].forward.score < min {
+			p = p.level[i].forward
+		}
+	}
+
+	p = p.level[0].forward
+	for p != nil {
+		if p.score > max {
+			break
+		}
+
+		val = append(val, p.member, p.score)
+		p = p.level[0].forward
+	}
+
+	return
+}
+
+// ZRevScoreRange returns all the elements in the sorted set at key with a score between max and min (including elements
+// with score equal to max or min)
+// In contrary to the default ordering of sorted sets, for this command the elements are considered to be ordered from
+// high to low scores.
+func (z *SortedSet) ZRevScoreRange(key string, max, min float64) (val []interface{}) {
+	if !z.exist(key) || min > max {
+		return nil
+	}
+
+	item := z.record[key].skl
+	minScore := item.head.level[0].forward.score
+	if min < minScore {
+		min = minScore
+	}
+
+	maxScore := item.tail.score
+	if max > maxScore {
+		max = maxScore
+	}
+
+	p := item.head
+	for i := item.level - 1; i >= 0; i-- {
+		for p.level[i].forward != nil && p.level[i].forward.score <= max {
+			p = p.level[i].forward
+		}
+	}
+
+	for p != nil {
+		if p.score < min {
+			break
+		}
+
+		val = append(val, p.member, p.score)
+		p = p.backward
+	}
+
+	return
 }
 
 func (z *SortedSet) exist(key string) bool {
@@ -214,4 +447,105 @@ func randomLevel() int16 {
 		level++
 	}
 	return level
+}
+
+func (skl *skipList) sklGetRank(score float64, member string) int64 {
+	var rank uint64 = 0
+	p := skl.head
+
+	for i := skl.level - 1; i >= 0; i-- {
+		for p.level[i].forward != nil &&
+			(p.level[i].forward.score < score ||
+				(p.level[i].forward.score == score && p.level[i].forward.member <= member)) {
+			rank += p.level[i].span
+			p = p.level[i].forward
+		}
+
+		if p.member == member {
+			return int64(rank)
+		}
+	}
+
+	return 0
+}
+
+func (z *SortedSet) findRange(key string, start, stop int64, reverse bool, withScores bool) (val []interface{}) {
+	skl := z.record[key].skl
+	length := skl.length
+
+	if start < 0 || stop >= length || start > stop {
+		return
+	}
+	span := (stop - start) + 1
+
+	var node *sklNode
+	if reverse {
+		node = skl.tail
+		if start > 0 {
+			node = skl.sklGetElementByRank(uint64(length - start))
+		}
+	} else {
+		node = skl.head.level[0].forward
+		if start > 0 {
+			node = skl.sklGetElementByRank(uint64(start + 1))
+		}
+	}
+
+	for span > 0 {
+		span--
+		if withScores {
+			val = append(val, node.member, node.score)
+		} else {
+			val = append(val, node.member)
+		}
+		if reverse {
+			node = node.backward
+		} else {
+			node = node.level[0].forward
+		}
+	}
+
+	return
+}
+
+func (skl *skipList) sklGetElementByRank(rank uint64) *sklNode {
+	var traverser uint64 = 0
+	p := skl.head
+
+	for i := skl.level - 1; i >= 0; i-- {
+		for p.level[i].forward != nil && (traverser+p.level[i].span) <= rank {
+			traverser += p.level[i].span
+			p = p.level[i].forward
+		}
+		if traverser == rank {
+			return p
+		}
+	}
+
+	return nil
+}
+
+func (z *SortedSet) getByRank(key string, rank int64, reverse bool) (string, float64) {
+	skl := z.record[key].skl
+	if rank < 0 || rank > skl.length {
+		return "", math.MinInt64
+	}
+
+	if reverse {
+		rank = skl.length - rank
+	} else {
+		rank++
+	}
+
+	n := skl.sklGetElementByRank(uint64(rank))
+	if n == nil {
+		return "", math.MinInt64
+	}
+
+	node := z.record[key].dict[n.member]
+	if node == nil {
+		return "", math.MinInt64
+	}
+
+	return node.member, node.score
 }
